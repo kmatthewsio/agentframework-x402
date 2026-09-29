@@ -81,7 +81,7 @@ builder.Services.AddX402Tools(configuration.GetSection("X402"));
 - **Automatic 402 handling** — Detects HTTP 402 responses, signs EIP-3009 payment authorizations, retries transparently
 - **Budget management** — Per-session USD budget with real-time tracking
 - **Thread-safe** — Safe for concurrent use across multiple agent invocations
-- **x402 V2 compliant** — Supports V2 protocol with V1 backwards compatibility
+- **x402 V2 compliant** — Supports V2 protocol; legacy V1 challenges are rejected without signing
 - **Multi-network** — Base Sepolia, Ethereum Sepolia, Arc Testnet, Base Mainnet, Ethereum Mainnet
 - **Local signing** — Uses Nethereum for local EIP-712 signing, no external services required
 - **Agent Framework native** — Exposes tools as `IList<AIFunction>` via `AIFunctionFactory`
@@ -132,7 +132,7 @@ The package exposes three AI functions:
 2. The tool makes the HTTP request
 3. If the server returns **200 OK**, the response is returned directly
 4. If the server returns **402 Payment Required**:
-   - Parses the `PAYMENT-REQUIRED` header (V2) or `X-PAYMENT-REQUIRED` (V1)
+   - Parses the `PAYMENT-REQUIRED` header (V2); rejects legacy V1 challenges without signing
    - Finds a compatible payment option matching the wallet's network
    - Checks the price against the per-request limit and session budget
    - Signs an EIP-3009 `TransferWithAuthorization` message locally

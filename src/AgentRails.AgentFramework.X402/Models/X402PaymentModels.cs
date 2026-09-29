@@ -12,6 +12,22 @@ public sealed class X402PaymentRequired
 
     [JsonPropertyName("accepts")]
     public List<X402PaymentOption> Accepts { get; set; } = new();
+
+    [JsonPropertyName("resource")]
+    public X402Resource? Resource { get; set; }
+
+    [JsonPropertyName("extensions")]
+    public Dictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
+}
+
+/// <summary>Resource binding in x402 V2 challenge.</summary>
+public sealed class X402Resource
+{
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? OtherFields { get; set; }
 }
 
 /// <summary>
@@ -25,13 +41,27 @@ public sealed class X402PaymentOption
     [JsonPropertyName("network")]
     public string Network { get; set; } = string.Empty;
 
+    // x402 V2 uses `amount`; V1 used `maxAmountRequired`.
+    // Do not default a missing amount to zero: fail closed before signing.
+    [JsonPropertyName("amount")]
+    public string? Amount { get; set; }
+
     [JsonPropertyName("maxAmountRequired")]
-    public string MaxAmountRequired { get; set; } = "0";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MaxAmountRequired { get; set; }
+
+    [JsonIgnore]
+    public string? PaymentAmount => Amount ?? MaxAmountRequired;
+
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? OtherFields { get; set; }
 
     [JsonPropertyName("resource")]
-    public string Resource { get; set; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Resource { get; set; }
 
     [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Description { get; set; }
 
     [JsonPropertyName("payTo")]
@@ -41,6 +71,7 @@ public sealed class X402PaymentOption
     public string Asset { get; set; } = string.Empty;
 
     [JsonPropertyName("extra")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public X402PaymentExtra? Extra { get; set; }
 }
 
@@ -50,13 +81,27 @@ public sealed class X402PaymentOption
 public sealed class X402PaymentExtra
 {
     [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Name { get; set; }
 
     [JsonPropertyName("version")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Version { get; set; }
 
     [JsonPropertyName("expiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? ExpiresAt { get; set; }
+
+    [JsonPropertyName("assetTransferMethod")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AssetTransferMethod { get; set; }
+
+    [JsonPropertyName("paymentFlow")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PaymentFlow { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? OtherFields { get; set; }
 }
 
 /// <summary>
@@ -72,6 +117,15 @@ public sealed class X402PaymentPayload
 
     [JsonPropertyName("network")]
     public string Network { get; set; } = string.Empty;
+
+    [JsonPropertyName("resource")]
+    public X402Resource? Resource { get; set; }
+
+    [JsonPropertyName("accepted")]
+    public X402PaymentOption? Accepted { get; set; }
+
+    [JsonPropertyName("extensions")]
+    public Dictionary<string, System.Text.Json.JsonElement>? Extensions { get; set; }
 
     [JsonPropertyName("payload")]
     public X402EvmPayload? Payload { get; set; }

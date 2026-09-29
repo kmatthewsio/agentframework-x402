@@ -17,6 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="live-challenge-fixture.json" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AgentRails.AgentFramework.X402\AgentRails.AgentFramework.X402.csproj" />
   </ItemGroup>
 

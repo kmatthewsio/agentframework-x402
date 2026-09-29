@@ -101,7 +101,9 @@ public sealed class X402Tools
 
             var paymentRequired = await ParsePaymentRequiredAsync(response, cancellationToken);
             if (paymentRequired == null || paymentRequired.Accepts.Count == 0)
-                return "Error: Received 402 but could not parse payment requirements.";
+                return response.Headers.Contains(X402Headers.LegacyPaymentRequired)
+                    ? "Error: V1 payment challenge is not supported by this V2 client."
+                    : "Error: Received 402 but could not parse payment requirements.";
 
             var option = FindCompatibleOption(paymentRequired.Accepts);
             if (option == null)
@@ -112,7 +114,36 @@ public sealed class X402Tools
                        $"wallet is configured for {_wallet.Network}.";
             }
 
-            var amountUnits = long.Parse(option.MaxAmountRequired);
+            if (!string.Equals(option.Scheme, "exact", StringComparison.OrdinalIgnoreCase))
+                return "Error: Unsupported payment scheme.";
+            if (!string.IsNullOrEmpty(option.Extra?.AssetTransferMethod) &&
+                !string.Equals(option.Extra.AssetTransferMethod, "eip3009", StringComparison.Ordinal))
+                return "Error: Unsupported asset transfer method.";
+            if (!string.IsNullOrEmpty(option.Extra?.PaymentFlow) &&
+                !string.Equals(option.Extra.PaymentFlow, "authorization", StringComparison.Ordinal))
+                return "Error: Unsupported payment flow.";
+
+            var expectedAsset = X402NetworkConfig.GetNetwork(_wallet.Network)?.UsdcContract;
+            if (expectedAsset == null ||
+                !string.Equals(option.Asset, expectedAsset, StringComparison.OrdinalIgnoreCase))
+                return "Error: Payment asset does not match the configured network USDC contract.";
+
+            if (paymentRequired.X402Version != 2 ||
+                !string.Equals(paymentRequired.Resource?.Url, url, StringComparison.Ordinal))
+                return "Error: Payment challenge version or resource URL mismatch.";
+
+            if (string.IsNullOrEmpty(option.Amount))
+                return "Error: Missing V2 payment amount.";
+            if (!long.TryParse(option.PaymentAmount, out var amountUnits) || amountUnits <= 0)
+                return "Error: Missing or invalid payment amount.";
+            if (option.MaxAmountRequired != null &&
+                !string.Equals(option.Amount, option.MaxAmountRequired, StringComparison.Ordinal))
+                return "Error: Conflicting payment amounts in challenge.";
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var requestUri) ||
+                requestUri.Scheme != Uri.UriSchemeHttps)
+                return "Error: Paid requests require an HTTPS resource URL.";
+
             var amountUsd = X402Wallet.UnitsToUsd(amountUnits);
 
             if (amountUsd > effectiveMaxPrice)
@@ -138,7 +169,7 @@ public sealed class X402Tools
 
             _logger.LogInformation("Signed payment: ${Amount:F4} to {PayTo}", amountUsd, option.PayTo);
 
-            var payloadJson = BuildPaymentPayloadJson(option, signature, nonceHex, validBefore);
+            var payloadJson = BuildPaymentPayloadJson(paymentRequired, option, amountUnits, signature, nonceHex, validBefore);
             var paymentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
 
             // --- Retry with payment ---
@@ -248,8 +279,9 @@ public sealed class X402Tools
         string? headerValue = null;
         if (response.Headers.TryGetValues(X402Headers.PaymentRequired, out var v2Values))
             headerValue = v2Values.FirstOrDefault();
-        else if (response.Headers.TryGetValues(X402Headers.LegacyPaymentRequired, out var v1Values))
-            headerValue = v1Values.FirstOrDefault();
+        // V1 framing is not safe to auto-pay with a V2 payload. Fail closed.
+        else if (response.Headers.Contains(X402Headers.LegacyPaymentRequired))
+            return null;
 
         if (!string.IsNullOrEmpty(headerValue))
         {
@@ -259,10 +291,6 @@ public sealed class X402Tools
                 var parsed = JsonSerializer.Deserialize<X402PaymentRequired>(json, JsonOptions);
                 if (parsed?.Accepts.Count > 0) return parsed;
 
-                // V1 compat: try flat structure
-                var flat = JsonSerializer.Deserialize<X402PaymentOption>(json, JsonOptions);
-                if (flat != null && !string.IsNullOrEmpty(flat.PayTo))
-                    return new X402PaymentRequired { Accepts = [flat] };
             }
             catch (Exception ex)
             {
@@ -288,14 +316,17 @@ public sealed class X402Tools
     }
 
     private string BuildPaymentPayloadJson(
-        X402PaymentOption option, string signature,
-        string nonceHex, long validBefore)
+        X402PaymentRequired required, X402PaymentOption option, long amountUnits,
+        string signature, string nonceHex, long validBefore)
     {
         var payload = new X402PaymentPayload
         {
             X402Version = 2,
             Scheme = option.Scheme,
             Network = _wallet.Network,
+            Resource = required.Resource,
+            Accepted = option,
+            Extensions = required.Extensions,
             Payload = new X402EvmPayload
             {
                 Signature = signature,
@@ -303,7 +334,7 @@ public sealed class X402Tools
                 {
                     From = _wallet.Address,
                     To = option.PayTo,
-                    Value = option.MaxAmountRequired,
+                    Value = amountUnits.ToString(),
                     ValidAfter = "0",
                     ValidBefore = validBefore.ToString(),
                     Nonce = nonceHex,
